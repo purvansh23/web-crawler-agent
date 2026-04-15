@@ -46,7 +46,7 @@ Create a root file named `.env` based off of the provided `.env.example` file. M
 ANTHROPIC_API_KEY="sk-ant-your-key"
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=your_postgres_password
-POSTGRES_DB=cross_dock_db
+POSTGRES_DB="your database name"
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 REDIS_URL=redis://localhost:6379/0
