@@ -31,6 +31,7 @@ class CompanyModel(Base):
     status = Column(String, default='pending')
     result = Column(Boolean)
     matched_urls = Column(String)
+    crawl_failed = Column(Boolean, default=False)  # True if ALL pages were unreadable
     processed_at = Column(DateTime, server_default=func.now())
 
 class DBManager:
@@ -116,13 +117,21 @@ class DBManager:
             session.commit()
             return result
 
-    def update_result(self, comp_id: str, status: str, result: bool = False, matched_urls: str = ""):
+    def reset_stuck_tasks(self) -> int:
+        """Resets all 'queued' tasks back to 'pending'. Useful if workers crash mid-execution."""
+        with self.SessionLocal() as session:
+            count = session.query(CompanyModel).filter(CompanyModel.status == 'queued').update({"status": "pending"})
+            session.commit()
+            return count
+
+    def update_result(self, comp_id: str, status: str, result: bool = False, matched_urls: str = "", crawl_failed: bool = False):
         with self.SessionLocal() as session:
             comp = session.query(CompanyModel).filter(CompanyModel.id == str(comp_id)).first()
             if comp:
                 comp.status = status
                 comp.result = result
                 comp.matched_urls = matched_urls
+                comp.crawl_failed = crawl_failed
             session.commit()
 
     def get_stats(self) -> Tuple[int, int]:
@@ -136,10 +145,19 @@ class DBManager:
             return session.query(CompanyModel).filter(CompanyModel.status == 'queued').count()
 
     def export_success_to_excel(self, output_path: str):
-        # We can read quickly into pandas using the sqlalchemy engine directly
+        # Main export: all confirmed True matches
         query = "SELECT id as Company_ID, company_name as Company_Name, city as City, state as State, zip as Zip, website as Website, matched_urls as Page_Path FROM companies WHERE result = true"
         df = pd.read_sql_query(query, self.engine)
         df.to_excel(output_path, index=False)
+        
+        # Also export crawl-failed companies as a separate review sheet
+        failed_path = output_path.replace('.xlsx', '_FAILED_REVIEW.xlsx')
+        failed_query = "SELECT id as Company_ID, company_name as Company_Name, city as City, state as State, zip as Zip, website as Website FROM companies WHERE crawl_failed = true"
+        df_failed = pd.read_sql_query(failed_query, self.engine)
+        if len(df_failed) > 0:
+            df_failed.to_excel(failed_path, index=False)
+            print(f"⚠️  {len(df_failed)} companies had crawl failures and could not be read. Saved to: {failed_path}")
+            print(f"   These websites were fully blocked. You may want to manually review these.")
 
     def close(self):
         self.engine.dispose()

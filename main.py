@@ -9,6 +9,7 @@ def main():
     parser.add_argument('--ingest', type=str, help='Path to Excel file to load into the PostgreSQL Database')
     parser.add_argument('--process', type=int, help='Queue N pending records into the Redis Broker', metavar='N')
     parser.add_argument('--export', type=str, help='Path to export the final matched Excel file')
+    parser.add_argument('--reset-stuck', action='store_true', help='Reset all currently queued tasks back to pending (use if workers crashed)')
 
     args = parser.parse_args()
     db = DBManager()
@@ -17,6 +18,12 @@ def main():
         print(f"Ingesting {args.ingest} into PostgreSQL Database...")
         db.load_from_excel(args.ingest)
         print("Ingestion complete. You can now dispatch jobs with --process <N>.")
+
+    if args.reset_stuck:
+        count = db.reset_stuck_tasks()
+        print(f"Successfully reset {count} stuck tasks from 'queued' back to 'pending'!")
+        if not args.process and not args.export:
+            return
 
     if args.process is not None:
         limit = args.process

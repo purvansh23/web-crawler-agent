@@ -105,25 +105,26 @@ class Crawler:
         return False
 
     async def _extract_with_playwright(self, url: str) -> str:
-        """Fallback Headless Chrome extractor for JavaScript-rendered sites or Cloudflare blocks."""
-        try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                # Ignore HTTPS errors to fix ERR_CERT_DATE_INVALID and ERR_CERT_COMMON_NAME_INVALID
-                context = await browser.new_context(ignore_https_errors=True, user_agent=self.headers['User-Agent'])
-                page = await context.new_page()
-                # 'domcontentloaded' prevents Timeout 20000ms by not waiting for infinite ad/tracking networks to idle
-                await page.goto(url, timeout=25000, wait_until='domcontentloaded')
-                
-                # Small artificial delay to allow React/Vue to pop the text into the DOM
-                await page.wait_for_timeout(2000) 
-                
-                text = await page.inner_text('body')
-                await browser.close()
-                return text if text else ""
-        except Exception as e:
-            print(f"    [PLAYWRIGHT FAILED] Could not render {url}")
-            return ""
+        """Fallback Headless Chrome extractor. Retries once with longer timeout before giving up."""
+        for attempt in range(2):  # Try up to 2 times
+            try:
+                timeout_ms = 25000 if attempt == 0 else 45000  # Longer timeout on retry
+                async with async_playwright() as p:
+                    browser = await p.chromium.launch(headless=True)
+                    context = await browser.new_context(ignore_https_errors=True, user_agent=self.headers['User-Agent'])
+                    page = await context.new_page()
+                    await page.goto(url, timeout=timeout_ms, wait_until='domcontentloaded')
+                    await page.wait_for_timeout(2000)
+                    text = await page.inner_text('body')
+                    await browser.close()
+                    if text and len(text.strip()) > 50:
+                        return text
+            except Exception as e:
+                if attempt == 0:
+                    print(f"    [PLAYWRIGHT RETRY] First attempt failed on {url}, retrying with longer timeout...")
+                else:
+                    print(f"    [PLAYWRIGHT FAILED] Could not render {url} after 2 attempts")
+        return ""
 
     async def get_page_text(self, url: str) -> str:
         """Extracts visible text using trafilatura, falling back to Playwright if needed."""

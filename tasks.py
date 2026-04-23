@@ -32,10 +32,18 @@ async def async_process(comp_id: str):
     
     matched_urls = []
     is_match = False
+    crawl_failed = False  # Track if ALL pages failed to load
+    pages_attempted = 0
+    pages_failed = 0
     
     for page_url in pages_to_crawl:
         print(f"  [{comp_id}] -> Crawling: {page_url}")
+        pages_attempted += 1
         text = await crawler.get_page_text(page_url)
+        
+        if not text or len(text.strip()) < 50:
+            pages_failed += 1
+            continue  # Skip this page, try the next one
         
         # 1. Deterministic Match
         if matcher.has_primary_match(text):
@@ -50,9 +58,14 @@ async def async_process(comp_id: str):
                 break
             else:
                 print(f"    [{comp_id}] [AI REJECTED] False positive context for {name}")
+    
+    # If every single page we tried returned empty/failed, flag this company for review
+    if pages_attempted > 0 and pages_failed == pages_attempted:
+        crawl_failed = True
+        print(f"  [{comp_id}] [CRAWL FAILED] All {pages_attempted} pages returned empty - website may be fully blocked. Flagged for review.")
 
     final_urls = ",".join(matched_urls)
-    db.update_result(comp_id, "done", is_match, final_urls)
+    db.update_result(comp_id, "done", is_match, final_urls, crawl_failed=crawl_failed)
     return is_match
 
 @celery_app.task(name='tasks.process_company')
